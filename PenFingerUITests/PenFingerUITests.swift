@@ -1,41 +1,62 @@
-//
-//  PenFingerUITests.swift
-//  PenFingerUITests
-//
-//  Created by emirhan on 23.12.2025.
-//
-
 import XCTest
 
 final class PenFingerUITests: XCTestCase {
-
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testCapturePreviewShareAndRetake() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["--uitest-camera"]
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        let shutter = app.buttons["takePhotoButton"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 10))
+        XCTAssertTrue(shutter.isEnabled)
+        XCTAssertGreaterThan(shutter.frame.midX, app.frame.midX)
+        XCTAssertGreaterThan(shutter.frame.midY, app.frame.height * 0.7)
+        attachScreenshot(app, name: "Camera controls")
+        shutter.tap()
+        XCTAssertTrue(app.images["capturedPhoto"].waitForExistence(timeout: 5))
+        attachScreenshot(app, name: "Photo preview with drawing")
+        let share = app.buttons["sharePhotoButton"]
+        XCTAssertTrue(share.exists)
+        share.tap()
+        // An image is handed to the system share sheet, which offers Save Image.
+        let save = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Save Image")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 30))
+        attachScreenshot(app, name: "Photo share sheet")
+        save.tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(shutter.waitForExistence(timeout: 5))
+        app.buttons["Clean"].tap()
+        shutter.tap()
+        XCTAssertTrue(app.images["capturedPhoto"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
     }
 
     @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+    func testCaptureFailureCanBeDismissedAndRetried() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitest-camera", "--uitest-capture-failure"]
+        app.launch()
+        let shutter = app.buttons["takePhotoButton"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 10))
+        shutter.tap()
+        XCTAssertTrue(app.alerts["Couldn't take photo"].waitForExistence(timeout: 5))
+        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(shutter.isEnabled)
+        shutter.tap()
+        XCTAssertTrue(app.alerts["Couldn't take photo"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func attachScreenshot(_ app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

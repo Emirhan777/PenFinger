@@ -2,19 +2,22 @@
 
 An iOS app for writing and drawing in the air with your index finger. The camera
 preview is overlaid with a line that follows the detected fingertip. Tap **Clean**
-to clear the drawing.
+to clear the drawing. Tap the camera button at the bottom right to take a photo
+with the drawing. The preview offers **Share** (including **Save Image**) and
+**Done** to return to drawing.
 
 ## Saved versions
 
 | GitHub release | App version | Build | Snapshot date |
 | --- | --- | --- | --- |
+| [v1.1-build.2](https://github.com/Emirhan777/PenFinger/releases/tag/v1.1-build.2) | 1.1 | 2 | 2026-09-27 |
 | [v1.0-build.1](https://github.com/Emirhan777/PenFinger/releases/tag/v1.0-build.1) | 1.0 | 1 | 2026-09-27 |
 
 Each release has a dedicated Git tag and downloadable source archives. Future
 development continues on `main`; existing release tags must not be moved or
 deleted. See [CHANGELOG.md](CHANGELOG.md) for the contents of each version.
 
-This first release preserves the local app source, assets, tests, and Xcode
+The first release, `v1.0-build.1`, preserves the original local app source, assets, tests, and Xcode
 project settings as found on the snapshot date. It also retains the earlier
 local Git history and the existing website history. It is a source backup;
 correspondence with any App Store binary has not been verified. Signed app
@@ -24,18 +27,25 @@ not included in the release source tree.
 ## Code overview
 
 - `PenFinger/PenFingerApp.swift` opens the SwiftUI `ContentView`.
-- `PenFinger/ContentView.swift` contains the camera preview, drawing canvas, and
-  hand pose processor. AVFoundation delivers camera frames to Vision's
+- `PenFinger/ContentView.swift` contains the camera preview, drawing canvas, and controls.
+- `PenFinger/CameraController.swift` manages the camera session, hand tracking,
+  and still photo capture. AVFoundation delivers camera frames to Vision's
   `VNDetectHumanHandPoseRequest`. Index fingertip observations above 0.6 confidence
   are converted to screen coordinates and drawn as a black, 4-point-wide line.
   The app retains at most 3,000 drawing points in memory.
+- `PenFinger/PhotoRenderer.swift` crops the photo to match the preview and composites
+  the drawing captured at the moment the photo button was tapped.
+- `PenFinger/PhotoPreview.swift` displays the result and presents the iOS share sheet.
 - `PenFinger/Assets.xcassets` contains the app icon and color assets.
-- `PenFingerTests` and `PenFingerUITests` contain the original template tests.
+- `PenFingerTests` checks photo cropping, orientation, and drawing placement.
+  `PenFingerUITests` checks capture, preview, sharing, retaking, and capture failures
+  using a synthetic camera image available only in Debug simulator builds.
 - `index.html` and `privacy.html` are the existing GitHub Pages support and privacy
   pages.
 
-Camera processing happens on the device. The current app code has no drawing
-export, persistent drawing storage, or network requests.
+Camera processing and photo composition happen on the device. Captured photos
+remain in memory until dismissed. Saving or sharing happens only when the user
+chooses an action in the system share sheet. The app makes no network requests.
 
 ## Open and build
 
@@ -44,6 +54,9 @@ destination. The current iOS deployment target is **18.5**. Use a physical iPhon
 or iPad with camera permission to exercise finger tracking; configure your Apple
 development team for device signing as needed. Although the project also lists
 other platforms, this snapshot's camera implementation uses UIKit.
+
+Live camera capture, permission prompts, and drawing alignment should also be
+checked on a physical iPhone/iPad before an App Store submission.
 
 To check an unsigned iOS Release build:
 
@@ -71,11 +84,11 @@ inside the cloned folder with `git switch -c restore-v1.0-build.1`.
    version/build in Xcode and add a matching changelog entry and saved-version row.
 2. Review `git status` and `git diff`, stage the intended files, and commit them.
 3. Create a new annotated tag using `v<app-version>-build.<build-number>` and push
-   both the commit and tag. For example, for version 1.1, build 2:
+   both the commit and tag. For example, for version 1.2, build 3:
 
    ```sh
-   git tag -a v1.1-build.2 -m "PenFinger 1.1 (build 2)"
-   git push --atomic origin main refs/tags/v1.1-build.2
+   git tag -a v1.2-build.3 -m "PenFinger 1.2 (build 3)"
+   git push --atomic origin main refs/tags/v1.2-build.3
    ```
 
 4. Create a GitHub release for that existing tag, describe the changes and checks,

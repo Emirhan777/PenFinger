@@ -1,161 +1,150 @@
 import SwiftUI
 import AVFoundation
-import Vision
-
-// MARK: - MAIN VIEW
 
 struct ContentView: View {
-    @StateObject private var processor = HandPoseProcessor()
+    @StateObject private var camera = CameraController()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
-            CameraView(processor: processor)
-                .ignoresSafeArea()
+            ZStack {
+                CameraView(camera: camera)
+                DrawingView(points: camera.drawPoints)
+                    .allowsHitTesting(false)
+            }
+            .ignoresSafeArea()
 
-            DrawingView(points: processor.drawPoints)
-                .ignoresSafeArea()
+            if let message = camera.cameraMessage {
+                VStack(spacing: 16) {
+                    Text(message)
+                        .multilineTextAlignment(.center)
+                    if camera.needsCameraAccess {
+                        Link("Open Settings", destination: URL(string: UIApplication.openSettingsURLString)!)
+                            .font(.headline)
+                    }
+                }
+                .padding(24)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .padding(32)
+            }
 
             VStack {
                 Spacer()
-
-                Button(action: {
-                    processor.clear()
-                }) {
-                    Text("Clean")
+                ZStack {
+                    Button("Clean", action: camera.clear)
                         .font(.headline)
                         .padding(.horizontal, 24)
                         .padding(.vertical, 12)
                         .background(Color.black.opacity(0.7))
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                         .clipShape(Capsule())
+                        .disabled(camera.isCapturing)
+
+                    HStack {
+                        Spacer()
+                        Button(action: camera.takePhoto) {
+                            ZStack {
+                                Circle().fill(.white)
+                                if camera.isCapturing {
+                                    ProgressView().tint(.black)
+                                } else {
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 24, weight: .semibold))
+                                        .foregroundStyle(.black)
+                                }
+                            }
+                            .frame(width: 60, height: 60)
+                            .overlay(Circle().strokeBorder(.black.opacity(0.15), lineWidth: 2))
+                            .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+                            .opacity(camera.isReady ? 1 : 0.5)
+                        }
+                        .disabled(!camera.isReady || camera.isCapturing)
+                        .accessibilityLabel("Take photo")
+                        .accessibilityHint("Capture the camera view with your drawing")
+                        .accessibilityIdentifier("takePhotoButton")
+                    }
                 }
-                .padding(.bottom, 40)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 32)
             }
         }
-    }
-}
-
-// MARK: - CAMERA VIEW
-
-struct CameraView: UIViewRepresentable {
-    let processor: HandPoseProcessor
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-
-        let session = AVCaptureSession()
-        session.sessionPreset = .high
-
-        guard let device = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device)
-        else { return view }
-
-        session.addInput(input)
-
-        let output = AVCaptureVideoDataOutput()
-        output.setSampleBufferDelegate(
-            processor,
-            queue: DispatchQueue(label: "camera.queue")
-        )
-        session.addOutput(output)
-
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.videoGravity = .resizeAspectFill
-        preview.frame = UIScreen.main.bounds
-        view.layer.addSublayer(preview)
-        
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            session.startRunning()
+        .background(.black)
+        .onAppear { camera.start() }
+        .onDisappear { camera.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                camera.start()
+            } else {
+                camera.stop()
+            }
         }
-        return view
+        .sheet(item: $camera.capturedPhoto) { photo in
+            PhotoPreview(photo: photo)
+        }
+        .alert(item: $camera.captureAlert) { alert in
+            Alert(title: Text("Couldn't take photo"), message: Text(alert.message),
+                  dismissButton: .default(Text("OK")))
+        }
     }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
 }
-
-// MARK: - DRAWING VIEW
 
 struct DrawingView: View {
+    // Points are normalized to the visible camera area, including its aspect-fill crop.
     let points: [CGPoint]
 
     var body: some View {
         Canvas { context, size in
-            guard points.count > 1 else { return }
-
+            guard points.count > 1, let first = points.first else { return }
             var path = Path()
-            path.move(to: points.first!)
-
+            path.move(to: CGPoint(x: first.x * size.width, y: first.y * size.height))
             for point in points.dropFirst() {
-                path.addLine(to: point)
+                path.addLine(to: CGPoint(x: point.x * size.width, y: point.y * size.height))
             }
-
-            context.stroke(
-                path,
-                with: .color(.black),
-                lineWidth: 4
-            )
+            context.stroke(path, with: .color(.black), lineWidth: PhotoRenderer.lineWidth)
         }
     }
 }
 
-// MARK: - HAND POSE PROCESSOR
+struct CameraView: UIViewRepresentable {
+    let camera: CameraController
 
-class HandPoseProcessor: NSObject,
-                          ObservableObject,
-                          AVCaptureVideoDataOutputSampleBufferDelegate {
-
-    @Published var drawPoints: [CGPoint] = []
-
-    private let request = VNDetectHumanHandPoseRequest()
-
-    func captureOutput(
-        _ output: AVCaptureOutput,
-        didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
-    ) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        let handler = VNImageRequestHandler(
-            cvPixelBuffer: pixelBuffer,
-            orientation: .right,
-            options: [:]
-        )
-
-        do {
-            try handler.perform([request])
-
-            guard let observation = request.results?.first else { return }
-
-            let points = try observation.recognizedPoints(.indexFinger)
-
-            guard let tip = points[.indexTip],
-                  tip.confidence > 0.6 else { return }
-
-            DispatchQueue.main.async {
-                let screenPoint = self.convertToScreen(point: tip.location)
-                self.drawPoints.append(screenPoint)
-
-                // Safety limit
-                if self.drawPoints.count > 3000 {
-                    self.drawPoints.removeFirst()
-                }
-            }
-
-        } catch {
-            print("Hand pose error:", error)
+    func makeUIView(context: Context) -> CameraPreviewView {
+        let view = CameraPreviewView()
+        #if DEBUG && targetEnvironment(simulator)
+        // A simulated camera has no hardware session to attach to the preview.
+        if !ProcessInfo.processInfo.arguments.contains("--uitest-camera") {
+            view.previewLayer.session = camera.session
         }
+        #else
+        view.previewLayer.session = camera.session
+        #endif
+        view.previewLayer.videoGravity = .resizeAspectFill
+        camera.previewLayer = view.previewLayer
+        return view
     }
 
-    private func convertToScreen(point: CGPoint) -> CGPoint {
-        let screen = UIScreen.main.bounds
-        return CGPoint(
-            x: point.x * screen.width,
-            y: (1 - point.y) * screen.height
-        )
+    func updateUIView(_ uiView: CameraPreviewView, context: Context) {
+        uiView.setNeedsLayout()
     }
+}
 
-    func clear() {
-        drawPoints.removeAll()
+final class CameraPreviewView: UIView {
+    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+    var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let connection = previewLayer.connection,
+              let orientation = window?.windowScene?.interfaceOrientation else { return }
+        let angle: CGFloat
+        switch orientation {
+        case .landscapeRight: angle = 0
+        case .landscapeLeft: angle = 180
+        case .portraitUpsideDown: angle = 270
+        default: angle = 90
+        }
+        if connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
+        }
     }
 }
