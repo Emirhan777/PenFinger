@@ -3,6 +3,56 @@ import UIKit
 @testable import PenFinger
 
 @MainActor
+struct PhotoSharingTests {
+    @Test func shareIncludesTheCompositePhotoAndDownloadInvitation() throws {
+        let photo = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { context in
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        }
+        let items = PhotoShareButton.activityItems(for: photo)
+        #expect(items.count == 2)
+        let photoItem = try #require(items.first as? PhotoShareItem)
+        let invitation = try #require(items.last as? PhotoInvitation)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let whatsapp = UIActivity.ActivityType("net.whatsapp.WhatsApp.ShareExtension")
+        for activity in [whatsapp, .message, .mail] {
+            #expect((photoItem.activityViewController(controller, itemForActivityType: activity) as? UIImage) === photo)
+            let text = invitation.activityViewController(controller, itemForActivityType: activity) as? String
+            #expect(text == "Try the PenFinger app out and draw with your fingers!\nhttps://apps.apple.com/app/id6757021735")
+        }
+        for activity in [UIActivity.ActivityType.saveToCameraRoll, .copyToPasteboard, .print] {
+            #expect(invitation.activityViewController(controller, itemForActivityType: activity) == nil)
+        }
+    }
+
+    @Test func cancelledOrFailedSharesNeverConfirmSuccess() {
+        let whatsapp = UIActivity.ActivityType("net.whatsapp.WhatsApp.ShareExtension")
+        let cancelled = PhotoShareOutcome.result(activity: whatsapp, completed: false, error: nil)
+        #expect(cancelled == .cancelled)
+        #expect(cancelled.confirmation == nil)
+        #expect(PhotoShareOutcome.result(activity: nil, completed: false, error: nil) == .cancelled)
+        for completed in [false, true] {
+            let failure = PhotoShareOutcome.result(activity: whatsapp, completed: completed,
+                                                   error: NSError(domain: "ShareTest", code: 1))
+            #expect(failure == .failed)
+            #expect(failure.confirmation == nil)
+        }
+    }
+
+    @Test func successfulShareConfirmationDescribesTheAction() {
+        let whatsapp = UIActivity.ActivityType("net.whatsapp.WhatsApp.ShareExtension")
+        for activity in [whatsapp, .message, .mail, .airDrop] {
+            #expect(PhotoShareOutcome.result(activity: activity, completed: true, error: nil).confirmation == "Photo sent")
+        }
+        #expect(PhotoShareOutcome.result(activity: .saveToCameraRoll, completed: true, error: nil).confirmation == "Photo saved")
+        #expect(PhotoShareOutcome.result(activity: .copyToPasteboard, completed: true, error: nil).confirmation == "Photo copied")
+        #expect(PhotoShareOutcome.result(activity: .print, completed: true, error: nil).confirmation == "Photo printed")
+        #expect(PhotoShareOutcome.result(activity: UIActivity.ActivityType("another.extension"), completed: true,
+                                        error: nil).confirmation == "Photo shared")
+    }
+}
+
+@MainActor
 struct PhotoRendererTests {
     @Test func portraitPhotoMatchesVisibleCropAndDrawing() throws {
         let photo = makeImage(size: CGSize(width: 400, height: 300)) { context in

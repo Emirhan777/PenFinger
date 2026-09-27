@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.2-build.3 — 2026-09-28
+
+- Shares the captured photo with the invitation "Try the PenFinger app out and draw
+  with your fingers!" and the verified App Store URL https://apps.apple.com/app/id6757021735.
+- Shows a green checkmark and **Photo sent** after WhatsApp or another messaging
+  activity reports successful completion. Saving, copying, printing, and other
+  sharing activities receive action-specific confirmation text.
+- Cancelling a share shows no success message. Sharing errors offer a retry;
+  previous confirmation is cleared when starting another share.
+- Retains the image-only behavior for Save Image, Copy, Print, and Assign to Contact.
+- Presents the native share sheet from the Share button, including a photo thumbnail
+  and an anchored popover where supported.
+- Records this version separately while preserving all earlier source releases.
+
+Validation: unsigned iOS Release build succeeded with Xcode 26.6 (17F113). Seven
+unit tests passed, covering image composition, share contents, and successful,
+cancelled, and failed activity results. iPhone simulator UI checks passed for
+capture, sharing, green save confirmation, cancellation, clearing/retaking, and
+capture-error recovery with a synthetic camera image. The full photo-sharing flow,
+including saving, green confirmation, cancellation, and retaking, also passed on
+an iPad simulator after a clean rebuild. Simulator validation used iOS 26.5.
+
+The confirmation reflects the sharing app's completion callback; it cannot verify
+recipient delivery or read status. WhatsApp's handling of the image and accompanying
+text requires physical-device validation with WhatsApp installed.
+
 ## v1.1-build.2 — 2026-09-27
 
 - Added a photo button at the bottom right of the drawing screen.

@@ -14,6 +14,8 @@ struct CaptureAlert: Identifiable {
 struct PhotoPreview: View {
     let photo: CapturedPhoto
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmation: String?
+    @State private var showShareError = false
 
     var body: some View {
         NavigationStack {
@@ -24,6 +26,18 @@ struct PhotoPreview: View {
                 .background(.black)
                 .accessibilityLabel("Photo with your drawing")
                 .accessibilityIdentifier("capturedPhoto")
+                .overlay(alignment: .bottom) {
+                    if let confirmation {
+                        Label(confirmation, systemImage: "checkmark.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(Color(red: 0.06, green: 0.40, blue: 0.20), in: Capsule())
+                            .padding()
+                            .accessibilityIdentifier("shareConfirmation")
+                    }
+                }
                 .navigationTitle("Your photo")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -31,14 +45,25 @@ struct PhotoPreview: View {
                         Button("Done") { dismiss() }
                     }
                     ToolbarItem(placement: .bottomBar) {
-                        ShareLink(item: Image(uiImage: photo.image),
-                                  preview: SharePreview("PenFinger photo", image: Image(uiImage: photo.image))) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                        .accessibilityIdentifier("sharePhotoButton")
+                        PhotoShareButton(image: photo.image, onStart: {
+                            confirmation = nil
+                        }, onCompletion: finishSharing)
                     }
                 }
         }
         .preferredColorScheme(.dark)
+        .alert("Couldn't share photo", isPresented: $showShareError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Please try sharing your photo again.")
+        }
+    }
+
+    private func finishSharing(_ outcome: PhotoShareOutcome) {
+        showShareError = outcome == .failed
+        confirmation = outcome.confirmation
+        if let confirmation {
+            UIAccessibility.post(notification: .announcement, argument: confirmation)
+        }
     }
 }

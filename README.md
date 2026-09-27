@@ -6,10 +6,20 @@ to clear the drawing. Tap the camera button at the bottom right to take a photo
 with the drawing. The preview offers **Share** (including **Save Image**) and
 **Done** to return to drawing.
 
+Sharing includes the photo and this invitation with
+[PenFinger's App Store link](https://apps.apple.com/app/id6757021735):
+"Try the PenFinger app out and draw with your fingers!"
+After the selected activity reports success, a green confirmation appears. Messaging
+activities, including WhatsApp, show **Photo sent**; saving shows **Photo saved**.
+Cancelling does not show a success message. This confirms the sharing activity
+completed, not that the recipient received or read the message. Receiving apps
+control how they handle the image and accompanying text.
+
 ## Saved versions
 
 | GitHub release | App version | Build | Snapshot date |
 | --- | --- | --- | --- |
+| [v1.2-build.3](https://github.com/Emirhan777/PenFinger/releases/tag/v1.2-build.3) | 1.2 | 3 | 2026-09-28 |
 | [v1.1-build.2](https://github.com/Emirhan777/PenFinger/releases/tag/v1.1-build.2) | 1.1 | 2 | 2026-09-27 |
 | [v1.0-build.1](https://github.com/Emirhan777/PenFinger/releases/tag/v1.0-build.1) | 1.0 | 1 | 2026-09-27 |
 
@@ -36,8 +46,11 @@ not included in the release source tree.
 - `PenFinger/PhotoRenderer.swift` crops the photo to match the preview and composites
   the drawing captured at the moment the photo button was tapped.
 - `PenFinger/PhotoPreview.swift` displays the result and presents the iOS share sheet.
+- `PenFinger/PhotoSharing.swift` presents the native share sheet, supplies the photo
+  and invitation, and interprets the system sharing completion callback.
 - `PenFinger/Assets.xcassets` contains the app icon and color assets.
-- `PenFingerTests` checks photo cropping, orientation, and drawing placement.
+- `PenFingerTests` checks photo cropping, orientation, drawing placement, share
+  contents, and success/cancellation/failure outcomes.
   `PenFingerUITests` checks capture, preview, sharing, retaking, and capture failures
   using a synthetic camera image available only in Debug simulator builds.
 - `index.html` and `privacy.html` are the existing GitHub Pages support and privacy
@@ -57,6 +70,8 @@ other platforms, this snapshot's camera implementation uses UIKit.
 
 Live camera capture, permission prompts, and drawing alignment should also be
 checked on a physical iPhone/iPad before an App Store submission.
+WhatsApp's handling of the photo and invitation must also be checked on a physical
+device with WhatsApp installed; its extension is unavailable in the simulator.
 
 To check an unsigned iOS Release build:
 
@@ -84,11 +99,11 @@ inside the cloned folder with `git switch -c restore-v1.0-build.1`.
    version/build in Xcode and add a matching changelog entry and saved-version row.
 2. Review `git status` and `git diff`, stage the intended files, and commit them.
 3. Create a new annotated tag using `v<app-version>-build.<build-number>` and push
-   both the commit and tag. For example, for version 1.2, build 3:
+   both the commit and tag. For example, for version 1.3, build 4:
 
    ```sh
-   git tag -a v1.2-build.3 -m "PenFinger 1.2 (build 3)"
-   git push --atomic origin main refs/tags/v1.2-build.3
+   git tag -a v1.3-build.4 -m "PenFinger 1.3 (build 4)"
+   git push --atomic origin main refs/tags/v1.3-build.4
    ```
 
 4. Create a GitHub release for that existing tag, describe the changes and checks,
