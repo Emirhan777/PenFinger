@@ -6,18 +6,20 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     let session = AVCaptureSession()
     weak var previewLayer: AVCaptureVideoPreviewLayer?
 
-    @Published private(set) var drawPoints: [CGPoint] = []
+    @Published private(set) var drawing = Drawing()
     @Published private(set) var isReady = false
     @Published private(set) var isCapturing = false
     @Published private(set) var cameraMessage: String?
     @Published private(set) var needsCameraAccess = false
     @Published var capturedPhoto: CapturedPhoto?
     @Published var captureAlert: CaptureAlert?
+    @Published private(set) var photoSaveStatus: PhotoSaveStatus = .saving
 
     private let sessionQueue = DispatchQueue(label: "camera.session")
     private let visionQueue = DispatchQueue(label: "camera.vision")
     private let photoOutput = AVCapturePhotoOutput()
     private let handRequest = VNDetectHumanHandPoseRequest()
+    private let photoLibrarySaver = PhotoLibrarySaver()
     // Configuration and photo delegates are confined to sessionQueue.
     private var configured = false
     private var photoDelegates: [Int64: PhotoCaptureDelegate] = [:]
@@ -32,6 +34,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         observers.append(center.addObserver(forName: AVCaptureSession.wasInterruptedNotification,
                                             object: session, queue: .main) { [weak self] _ in
             self?.isReady = false
+            self?.pauseDrawing()
             self?.cameraMessage = "The camera is temporarily unavailable. Try again in a moment."
         })
         observers.append(center.addObserver(forName: AVCaptureSession.interruptionEndedNotification,
@@ -42,6 +45,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification,
                                             object: session, queue: .main) { [weak self] _ in
             self?.isReady = false
+            self?.pauseDrawing()
             self?.cameraMessage = "The camera stopped. Reopen the app to try again."
         })
     }
@@ -59,7 +63,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             isReady = true
             if fixturePhoto == nil {
                 fixturePhoto = makeFixturePhoto()
-                drawPoints = [CGPoint(x: 0.2, y: 0.5), CGPoint(x: 0.8, y: 0.5)]
+                drawing.append(CGPoint(x: 0.2, y: 0.5))
+                drawing.append(CGPoint(x: 0.8, y: 0.5))
             }
             return
         }
@@ -86,6 +91,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     func stop() {
         wantsToRun = false
         isReady = false
+        pauseDrawing()
         sessionQueue.async { [self] in
             if session.isRunning { session.stopRunning() }
         }
@@ -140,7 +146,11 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     }
 
     func clear() {
-        drawPoints.removeAll()
+        drawing.clear()
+    }
+
+    func selectColor(_ color: InkColor) {
+        drawing.selectColor(color)
     }
 
     func takePhoto() {
@@ -153,7 +163,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             let viewportSize = size.width > 0 && size.height > 0 ? size : fixturePhoto.size
             if ProcessInfo.processInfo.arguments.contains("--uitest-capture-failure") {
                 finishCapture(.failure(CameraError.captureFailed))
-            } else if let image = PhotoRenderer.render(photo: fixturePhoto, points: drawPoints, viewportSize: viewportSize) {
+            } else if let image = PhotoRenderer.render(photo: fixturePhoto, strokes: drawing.strokes, viewportSize: viewportSize) {
                 finishCapture(.success(image))
             } else {
                 finishCapture(.failure(CameraError.captureFailed))
@@ -163,7 +173,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         #endif
 
         guard let previewLayer, previewLayer.bounds.width > 0, previewLayer.bounds.height > 0 else { return }
-        let points = drawPoints
+        let strokes = drawing.strokes
         let viewportSize = previewLayer.bounds.size
         let rotation = previewLayer.connection?.videoRotationAngle ?? 90
         isCapturing = true
@@ -181,7 +191,7 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
             settings.flashMode = .off
             settings.photoQualityPrioritization = .speed
             let id = settings.uniqueID
-            let delegate = PhotoCaptureDelegate(points: points, viewportSize: viewportSize) { [weak self] result in
+            let delegate = PhotoCaptureDelegate(strokes: strokes, viewportSize: viewportSize) { [weak self] result in
                 guard let self else { return }
                 self.sessionQueue.async { self.photoDelegates[id] = nil }
                 DispatchQueue.main.async { self.finishCapture(result) }
@@ -194,35 +204,71 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private func finishCapture(_ result: Result<UIImage, Error>) {
         isCapturing = false
         switch result {
-        case .success(let image): capturedPhoto = CapturedPhoto(image: image)
+        case .success(let image):
+            let photo = CapturedPhoto(image: image)
+            photoSaveStatus = .saving
+            capturedPhoto = photo
+            photoLibrarySaver.save(image) { [weak self] result in
+                DispatchQueue.main.async {
+                    // A completed save must not update a newer photo's preview.
+                    guard let self, self.capturedPhoto?.id == photo.id else { return }
+                    switch result {
+                    case .success: self.photoSaveStatus = .saved
+                    case .failure(let error): self.photoSaveStatus = .failed(error)
+                    }
+                }
+            }
         case .failure(let error): captureAlert = CaptureAlert(message: error.localizedDescription)
         }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            updateDrawing(with: nil)
+            return
+        }
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .right, options: [:])
         do {
             try handler.perform([handRequest])
-            guard let observation = handRequest.results?.first,
-                  let tip = try observation.recognizedPoints(.indexFinger)[.indexTip],
-                  tip.confidence > 0.6 else { return }
+            guard let observation = handRequest.results?.first else {
+                updateDrawing(with: nil)
+                return
+            }
+            let landmarks = try observation.recognizedPoints(.all).mapValues {
+                HandLandmark(location: $0.location, confidence: $0.confidence)
+            }
+            // Vision's .right orientation swaps the sensor image's dimensions.
+            let imageSize = CGSize(width: CGFloat(CVPixelBufferGetHeight(pixelBuffer)),
+                                   height: CGFloat(CVPixelBufferGetWidth(pixelBuffer)))
+            let tip = HandDrawingGesture.drawingTip(in: landmarks, imageSize: imageSize)
             // Undo Vision's clockwise rotation and bottom-left origin to obtain
             // the native sensor coordinates expected by the preview layer.
-            let devicePoint = CGPoint(x: 1 - tip.location.y, y: 1 - tip.location.x)
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.isReady, !self.isCapturing, self.capturedPhoto == nil,
-                      let preview = self.previewLayer,
-                      preview.bounds.width > 0, preview.bounds.height > 0 else { return }
-                let point = preview.layerPointConverted(fromCaptureDevicePoint: devicePoint)
-                self.drawPoints.append(CGPoint(x: point.x / preview.bounds.width,
-                                               y: point.y / preview.bounds.height))
-                if self.drawPoints.count > 3000 { self.drawPoints.removeFirst() }
-            }
+            let devicePoint = tip.map { CGPoint(x: 1 - $0.y, y: 1 - $0.x) }
+            updateDrawing(with: devicePoint)
         } catch {
-            // A missed hand observation should not interrupt the camera or photo capture.
+            // End the stroke on lost or uncertain tracking, without stopping the camera.
+            updateDrawing(with: nil)
         }
+    }
+
+    private func updateDrawing(with devicePoint: CGPoint?) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.isReady, !self.isCapturing, self.capturedPhoto == nil,
+                  let devicePoint, let preview = self.previewLayer,
+                  preview.bounds.width > 0, preview.bounds.height > 0 else {
+                self.pauseDrawing()
+                return
+            }
+            let point = preview.layerPointConverted(fromCaptureDevicePoint: devicePoint)
+            self.drawing.append(CGPoint(x: point.x / preview.bounds.width,
+                                        y: point.y / preview.bounds.height))
+        }
+    }
+
+    private func pauseDrawing() {
+        if drawing.isStrokeActive { drawing.endStroke() }
     }
 
     #if DEBUG && targetEnvironment(simulator)
@@ -254,13 +300,13 @@ private enum CameraError: LocalizedError {
 }
 
 private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
-    let points: [CGPoint]
+    let strokes: [DrawingStroke]
     let viewportSize: CGSize
     let completion: (Result<UIImage, Error>) -> Void
     private var result: Result<UIImage, Error>?
 
-    init(points: [CGPoint], viewportSize: CGSize, completion: @escaping (Result<UIImage, Error>) -> Void) {
-        self.points = points
+    init(strokes: [DrawingStroke], viewportSize: CGSize, completion: @escaping (Result<UIImage, Error>) -> Void) {
+        self.strokes = strokes
         self.viewportSize = viewportSize
         self.completion = completion
     }
@@ -270,7 +316,7 @@ private final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegat
         if let error {
             result = .failure(error)
         } else if let data = photo.fileDataRepresentation(), let photoImage = UIImage(data: data),
-                  let image = PhotoRenderer.render(photo: photoImage, points: points, viewportSize: viewportSize) {
+                  let image = PhotoRenderer.render(photo: photoImage, strokes: strokes, viewportSize: viewportSize) {
             result = .success(image)
         } else {
             result = .failure(CameraError.captureFailed)

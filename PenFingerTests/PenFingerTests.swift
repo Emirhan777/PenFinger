@@ -53,6 +53,70 @@ struct PhotoSharingTests {
 }
 
 @MainActor
+struct DrawingTests {
+    @Test func pausingPreservesInkAndStartsASeparateStrokeInTheSameColor() {
+        var drawing = Drawing()
+        drawing.selectColor(.red)
+        let firstPoints = [CGPoint(x: 0.1, y: 0.25), CGPoint(x: 0.4, y: 0.25)]
+        firstPoints.forEach { drawing.append($0) }
+        #expect(drawing.isStrokeActive)
+        drawing.endStroke()
+        drawing.endStroke()
+        #expect(!drawing.isStrokeActive)
+        #expect(drawing.strokes.count == 1)
+        #expect(drawing.strokes[0].points == firstPoints)
+
+        let nextPoints = [CGPoint(x: 0.6, y: 0.75), CGPoint(x: 0.9, y: 0.75)]
+        nextPoints.forEach { drawing.append($0) }
+        #expect(drawing.isStrokeActive)
+        #expect(drawing.strokes.count == 2)
+        #expect(drawing.strokes[0].points == firstPoints)
+        #expect(drawing.strokes[1].points == nextPoints)
+        #expect(drawing.strokes.allSatisfy { $0.color == .red })
+    }
+
+    @Test func changingColorPreservesEarlierStrokesAndCaptureSnapshot() {
+        var drawing = Drawing()
+        drawing.append(CGPoint(x: 0.1, y: 0.25))
+        drawing.append(CGPoint(x: 0.4, y: 0.25))
+        drawing.selectColor(.red)
+        drawing.append(CGPoint(x: 0.6, y: 0.75))
+        drawing.append(CGPoint(x: 0.9, y: 0.75))
+        let snapshot = drawing.strokes
+
+        drawing.selectColor(.black)
+        drawing.append(CGPoint(x: 0.1, y: 0.9))
+        drawing.clear()
+
+        #expect(snapshot.count == 2)
+        #expect(snapshot[0].color == .black)
+        #expect(snapshot[1].color == .red)
+        #expect(snapshot[0].points == [CGPoint(x: 0.1, y: 0.25), CGPoint(x: 0.4, y: 0.25)])
+        #expect(snapshot[1].points == [CGPoint(x: 0.6, y: 0.75), CGPoint(x: 0.9, y: 0.75)])
+        #expect(drawing.strokes.isEmpty)
+    }
+
+    @Test func pointLimitAppliesAcrossColorsAndCleaningKeepsSelectedColor() {
+        var drawing = Drawing()
+        for index in 0..<3002 {
+            if index == 1 { drawing.selectColor(.blue) }
+            drawing.append(CGPoint(x: CGFloat(index), y: 0.5))
+        }
+        #expect(drawing.strokes.reduce(0) { $0 + $1.points.count } == 3000)
+        #expect(drawing.strokes.first?.points.first?.x == 2)
+        #expect(drawing.strokes.allSatisfy { $0.color == .blue })
+
+        drawing.clear()
+        drawing.append(CGPoint(x: 0.2, y: 0.3))
+        drawing.append(CGPoint(x: 0.4, y: 0.3))
+        #expect(drawing.color == .blue)
+        #expect(drawing.strokes.count == 1)
+        #expect(drawing.strokes[0].points.count == 2)
+        #expect(drawing.strokes[0].color == .blue)
+    }
+}
+
+@MainActor
 struct PhotoRendererTests {
     @Test func portraitPhotoMatchesVisibleCropAndDrawing() throws {
         let photo = makeImage(size: CGSize(width: 400, height: 300)) { context in
@@ -62,7 +126,8 @@ struct PhotoRendererTests {
             context.fill(CGRect(x: 125, y: 0, width: 150, height: 300))
         }
         let result = try #require(PhotoRenderer.render(
-            photo: photo, points: [CGPoint(x: 0.25, y: 0.5), CGPoint(x: 0.75, y: 0.5)],
+            photo: photo, strokes: [DrawingStroke(color: .black,
+                points: [CGPoint(x: 0.25, y: 0.5), CGPoint(x: 0.75, y: 0.5)])],
             viewportSize: CGSize(width: 100, height: 200)))
 
         #expect(result.size == CGSize(width: 150, height: 300))
@@ -81,7 +146,7 @@ struct PhotoRendererTests {
             UIColor.green.setFill()
             context.fill(CGRect(x: 0, y: 50, width: 400, height: 200))
         }
-        let result = try #require(PhotoRenderer.render(photo: photo, points: [],
+        let result = try #require(PhotoRenderer.render(photo: photo, strokes: [],
                                                        viewportSize: CGSize(width: 200, height: 100)))
         #expect(result.size == CGSize(width: 400, height: 200))
         #expect(isGreen(pixel(result, x: 100, y: 1)))
@@ -96,7 +161,7 @@ struct PhotoRendererTests {
             context.fill(CGRect(x: 100, y: 0, width: 100, height: 100))
         }
         let oriented = UIImage(cgImage: try #require(raw.cgImage), scale: 1, orientation: .right)
-        let result = try #require(PhotoRenderer.render(photo: oriented, points: [],
+        let result = try #require(PhotoRenderer.render(photo: oriented, strokes: [],
                                                        viewportSize: CGSize(width: 100, height: 200)))
         #expect(result.size == CGSize(width: 100, height: 200))
         #expect(result.imageOrientation == .up)
@@ -111,10 +176,28 @@ struct PhotoRendererTests {
             context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
         }
         for points in [[], [CGPoint(x: 0.5, y: 0.5)]] {
-            let result = try #require(PhotoRenderer.render(photo: photo, points: points, viewportSize: photo.size))
+            let result = try #require(PhotoRenderer.render(photo: photo,
+                strokes: [DrawingStroke(color: .black, points: points)], viewportSize: photo.size))
             #expect(isGreen(pixel(result, x: 50, y: 50)))
         }
-        #expect(PhotoRenderer.render(photo: photo, points: [], viewportSize: .zero) == nil)
+        #expect(PhotoRenderer.render(photo: photo, strokes: [], viewportSize: .zero) == nil)
+    }
+
+    @Test func photoPreservesEachInkColorWithoutConnectingSeparateStrokes() throws {
+        let photo = makeImage(size: CGSize(width: 100, height: 100)) { context in
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+        }
+        let strokes = [
+            DrawingStroke(color: .red, points: [CGPoint(x: 0.1, y: 0.25), CGPoint(x: 0.4, y: 0.25)]),
+            DrawingStroke(color: .blue, points: [CGPoint(x: 0.6, y: 0.75), CGPoint(x: 0.9, y: 0.75)])
+        ]
+        let result = try #require(PhotoRenderer.render(photo: photo, strokes: strokes, viewportSize: photo.size))
+        let red = pixel(result, x: 25, y: 25)
+        let blue = pixel(result, x: 75, y: 75)
+        #expect(red[0] > 240 && red[1] < 15 && red[2] < 15)
+        #expect(blue[0] < 15 && blue[1] < 15 && blue[2] > 240)
+        #expect(isGreen(pixel(result, x: 50, y: 50)))
     }
 
     private func makeImage(size: CGSize, draw: (UIGraphicsImageRendererContext) -> Void) -> UIImage {

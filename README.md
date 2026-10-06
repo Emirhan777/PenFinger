@@ -1,10 +1,24 @@
 # PenFinger
 
 An iOS app for writing and drawing in the air with your index finger. The camera
-preview is overlaid with a line that follows the detected fingertip. Tap **Clean**
-to clear the drawing. Tap the camera button at the bottom right to take a photo
-with the drawing. The preview offers **Share** (including **Save Image**) and
-**Done** to return to drawing.
+preview is overlaid with a line that follows the detected index fingertip. Draw
+with an open hand, a pointing finger, or any other pose except a clenched fist.
+Close your hand into a fist to pause without clearing the drawing; opening it
+again starts a separate stroke. Losing hand tracking also ends the current
+stroke. Drawing continues while the index fingertip is tracked, even if the
+wrist or lower palm is outside the camera frame. Fist detection pauses drawing
+only when the wrist and all four curled fingers can be recognized. Tap the
+colored circle at the bottom left to choose from eight colored swatches: black, white, red,
+orange, yellow, green, blue, or purple. The selected swatch has a checkmark.
+The palette opens and closes immediately; tapping the colored circle again
+closes it. Clean and the camera button work on the first tap while it is open.
+New strokes use that color; earlier strokes keep theirs. Tap **Clean**
+to clear the drawing while keeping your selected color. Tap the camera button at
+the bottom right to take a photo with the colored drawing and automatically
+save it to Photos. The first save requests permission to add photos. The preview
+shows **Saved to Photos** after saving succeeds, or a message if saving fails;
+you can still share the photo if saving is unavailable. The preview offers
+**Share** (including **Save Image**) and **Done** to return to drawing.
 
 Sharing includes the photo and this invitation with
 [PenFinger's App Store link](https://apps.apple.com/app/id6757021735):
@@ -19,6 +33,7 @@ control how they handle the image and accompanying text.
 
 | GitHub release | App version | Build | Snapshot date |
 | --- | --- | --- | --- |
+| [v1.3-build.4](https://github.com/Emirhan777/PenFinger/releases/tag/v1.3-build.4) | 1.3 | 4 | 2026-10-06 |
 | [v1.2-build.3](https://github.com/Emirhan777/PenFinger/releases/tag/v1.2-build.3) | 1.2 | 3 | 2026-09-28 |
 | [v1.1-build.2](https://github.com/Emirhan777/PenFinger/releases/tag/v1.1-build.2) | 1.1 | 2 | 2026-09-27 |
 | [v1.0-build.1](https://github.com/Emirhan777/PenFinger/releases/tag/v1.0-build.1) | 1.0 | 1 | 2026-09-27 |
@@ -38,26 +53,36 @@ not included in the release source tree.
 
 - `PenFinger/PenFingerApp.swift` opens the SwiftUI `ContentView`.
 - `PenFinger/ContentView.swift` contains the camera preview, drawing canvas, and controls.
+- `PenFinger/Drawing.swift` stores colored strokes and the selected ink color.
+- `PenFinger/HandDrawingGesture.swift` checks finger bends and positions to pause
+  on a clenched fist. It accounts for camera aspect ratio and hand roll,
+  and allows drawing with a cropped palm. It pauses only when a fist is detected
+  or the fingertip cannot be tracked.
 - `PenFinger/CameraController.swift` manages the camera session, hand tracking,
   and still photo capture. AVFoundation delivers camera frames to Vision's
-  `VNDetectHumanHandPoseRequest`. Index fingertip observations above 0.6 confidence
-  are converted to screen coordinates and drawn as a black, 4-point-wide line.
+  `VNDetectHumanHandPoseRequest`. Outside a closed fist, index fingertip observations
+  above 0.6 confidence are converted to screen coordinates and drawn as a
+  4-point-wide line in the selected color (black by default).
   The app retains at most 3,000 drawing points in memory.
 - `PenFinger/PhotoRenderer.swift` crops the photo to match the preview and composites
   the drawing captured at the moment the photo button was tapped.
+- `PenFinger/PhotoLibrarySaver.swift` requests add-only Photos access and saves
+  each completed capture asynchronously.
 - `PenFinger/PhotoPreview.swift` displays the result and presents the iOS share sheet.
 - `PenFinger/PhotoSharing.swift` presents the native share sheet, supplies the photo
   and invitation, and interprets the system sharing completion callback.
 - `PenFinger/Assets.xcassets` contains the app icon and color assets.
-- `PenFingerTests` checks photo cropping, orientation, drawing placement, share
-  contents, and success/cancellation/failure outcomes.
-  `PenFingerUITests` checks capture, preview, sharing, retaking, and capture failures
+- `PenFingerTests` checks open/closed-hand gestures, cropped hands, tracking loss, stroke breaks,
+  ink colors, photo cropping, orientation, drawing placement, share contents,
+  and success/cancellation/failure outcomes.
+  `PenFingerUITests` checks color selection, capture, preview, sharing, retaking, and capture failures
   using a synthetic camera image available only in Debug simulator builds.
 - `index.html` and `privacy.html` are the existing GitHub Pages support and privacy
   pages.
 
-Camera processing and photo composition happen on the device. Captured photos
-remain in memory until dismissed. Saving or sharing happens only when the user
+Camera processing and photo composition happen on the device. Each captured
+photo with its drawing is automatically saved to Photos when permission allows.
+The preview remains in memory until dismissed. Sharing happens when the user
 chooses an action in the system share sheet. The app makes no network requests.
 
 ## Open and build

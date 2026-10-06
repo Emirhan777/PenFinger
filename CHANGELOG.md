@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.3-build.4 — 2026-10-06
+
+- Adds eight ink colors with a swatch-only button and a palette of colored circles.
+  New strokes use the selected color; existing strokes and captured photos keep
+  their original colors. Clean retains the selected color.
+- Draws with any tracked index fingertip except when a clenched fist is detected.
+  Drawing continues when the wrist or lower palm is outside the camera frame.
+  Fist detection requires enough visible joints to confirm all four fingers curled.
+- Ends strokes when closing the hand or losing fingertip tracking, so resuming
+  drawing does not connect separate strokes.
+- Opens and closes the color palette immediately. Other toolbar buttons work on
+  their first tap while the palette is open, and Color and Clean remain available
+  during photo capture.
+- Automatically saves each captured photo with its colored drawing to Photos,
+  using add-only permission. The preview stays available during saving and shows
+  success or an actionable failure message. Sharing remains available if saving fails.
+- Updates the Photos permission text and support/privacy pages for automatic saving.
+
+Validation: unsigned iOS Release build succeeded with Xcode 26.6. All 21 unit tests
+and three iPhone simulator UI tests passed on iOS 18.5. Checks covered ink colors,
+cropped-hand and fist gestures using synthetic landmarks, separate strokes, photo
+composition, Photos authorization/write failures, automatic saving, preview,
+sharing, cancellation, clearing/retaking, immediate palette controls, and capture
+error recovery. A saved simulator photo was inspected to confirm the drawing was
+included in the photo library image.
+
+The GitHub release provides source archives; iOS distribution is handled separately
+in App Store Connect. Live hand recognition and camera alignment still require
+a physical-device check.
+
 ## v1.2-build.3 — 2026-09-28
 
 - Shares the captured photo with the invitation "Try the PenFinger app out and draw

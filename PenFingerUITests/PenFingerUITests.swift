@@ -19,6 +19,7 @@ final class PenFingerUITests: XCTestCase {
         attachScreenshot(app, name: "Camera controls")
         shutter.tap()
         XCTAssertTrue(app.images["capturedPhoto"].waitForExistence(timeout: 5))
+        waitForAutomaticSave(app)
         attachScreenshot(app, name: "Photo preview with drawing")
         let share = app.buttons["sharePhotoButton"]
         XCTAssertTrue(share.exists)
@@ -51,14 +52,71 @@ final class PenFingerUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Photo saved"].exists)
         XCTAssertFalse(app.staticTexts["Photo sent"].exists)
         XCTAssertFalse(app.staticTexts["Photo shared"].exists)
+        XCTAssertTrue(app.staticTexts["Saved to Photos"].exists)
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         XCTAssertTrue(shutter.waitForExistence(timeout: 5))
         app.buttons["Clean"].tap()
         shutter.tap()
         XCTAssertTrue(app.images["capturedPhoto"].waitForExistence(timeout: 5))
+        waitForAutomaticSave(app)
         XCTAssertFalse(app.staticTexts["Photo saved"].exists)
         app.buttons["Done"].tap()
+    }
+
+    @MainActor
+    func testColorSelectionAndCleaning() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitest-camera"]
+        app.launch()
+
+        let color = app.buttons["drawingColorButton"]
+        XCTAssertTrue(color.waitForExistence(timeout: 10))
+        XCTAssertEqual(color.value as? String, "Black")
+        color.tap()
+        let red = app.buttons["inkColor-Red"]
+        XCTAssertTrue(red.waitForExistence(timeout: 5))
+        for name in ["Black", "White", "Red", "Orange", "Yellow", "Green", "Blue", "Purple"] {
+            XCTAssertTrue(app.buttons["inkColor-\(name)"].exists)
+            XCTAssertFalse(app.staticTexts[name].exists)
+        }
+        attachScreenshot(app, name: "Drawing color palette")
+        red.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Red"), object: color)
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 5), .completed)
+        XCTAssertEqual(color.value as? String, "Red")
+        attachScreenshot(app, name: "Red ink selected")
+
+        // The picker must not intercept another toolbar button or require an
+        // extra dismissal tap before that button's action can run.
+        color.tap()
+        XCTAssertTrue(red.waitForExistence(timeout: 5))
+        color.tap()
+        XCTAssertFalse(red.exists)
+        color.tap()
+        XCTAssertTrue(red.waitForExistence(timeout: 5))
+        app.buttons["Clean"].tap()
+        XCTAssertFalse(red.exists)
+        XCTAssertEqual(color.value as? String, "Red")
+        color.tap()
+        XCTAssertTrue(red.waitForExistence(timeout: 5))
+        app.buttons["takePhotoButton"].tap()
+        XCTAssertTrue(app.images["capturedPhoto"].waitForExistence(timeout: 5))
+        waitForAutomaticSave(app)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(color.waitForExistence(timeout: 5))
+        XCTAssertEqual(color.value as? String, "Red")
+    }
+
+    @MainActor
+    private func waitForAutomaticSave(_ app: XCUIApplication) {
+        let saved = app.staticTexts["Saved to Photos"]
+        if !saved.waitForExistence(timeout: 1) {
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let allow = springboard.alerts.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Allow")).firstMatch
+            if allow.waitForExistence(timeout: 3) { allow.tap() }
+        }
+        XCTAssertTrue(saved.waitForExistence(timeout: 10))
     }
 
     @MainActor

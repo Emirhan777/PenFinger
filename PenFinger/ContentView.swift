@@ -4,14 +4,17 @@ import AVFoundation
 struct ContentView: View {
     @StateObject private var camera = CameraController()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showColors = false
 
     var body: some View {
         ZStack {
             ZStack {
                 CameraView(camera: camera)
-                DrawingView(points: camera.drawPoints)
+                DrawingView(strokes: camera.drawing.strokes)
                     .allowsHitTesting(false)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { showColors = false }
             .ignoresSafeArea()
 
             if let message = camera.cameraMessage {
@@ -30,38 +33,70 @@ struct ContentView: View {
 
             VStack {
                 Spacer()
-                ZStack {
-                    Button("Clean", action: camera.clear)
-                        .font(.headline)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .background(Color.black.opacity(0.7))
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                        .disabled(camera.isCapturing)
-
-                    HStack {
-                        Spacer()
-                        Button(action: camera.takePhoto) {
-                            ZStack {
-                                Circle().fill(.white)
-                                if camera.isCapturing {
-                                    ProgressView().tint(.black)
-                                } else {
-                                    Image(systemName: "camera.fill")
-                                        .font(.system(size: 24, weight: .semibold))
-                                        .foregroundStyle(.black)
-                                }
-                            }
-                            .frame(width: 60, height: 60)
-                            .overlay(Circle().strokeBorder(.black.opacity(0.15), lineWidth: 2))
+                HStack(spacing: 8) {
+                    Button {
+                        showColors.toggle()
+                    } label: {
+                        Circle()
+                            .fill(camera.drawing.color.color)
+                            .frame(width: 48, height: 48)
+                            .overlay(Circle().strokeBorder(.white.opacity(0.8), lineWidth: 2))
                             .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
-                            .opacity(camera.isReady ? 1 : 0.5)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Drawing color")
+                    .accessibilityValue(camera.drawing.color.rawValue)
+                    .accessibilityHint("Choose the color for new strokes")
+                    .accessibilityIdentifier("drawingColorButton")
+
+                    Spacer(minLength: 0)
+                    Button("Clean") {
+                        showColors = false
+                        camera.clear()
+                    }
+                    .font(.headline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.7))
+                    .foregroundStyle(.white)
+                    .clipShape(Capsule())
+
+                    Spacer(minLength: 0)
+                    Button {
+                        showColors = false
+                        camera.takePhoto()
+                    } label: {
+                        ZStack {
+                            Circle().fill(.white)
+                            if camera.isCapturing {
+                                ProgressView().tint(.black)
+                            } else {
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundStyle(.black)
+                            }
                         }
-                        .disabled(!camera.isReady || camera.isCapturing)
-                        .accessibilityLabel("Take photo")
-                        .accessibilityHint("Capture the camera view with your drawing")
-                        .accessibilityIdentifier("takePhotoButton")
+                        .frame(width: 60, height: 60)
+                        .overlay(Circle().strokeBorder(.black.opacity(0.15), lineWidth: 2))
+                        .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+                        .opacity(camera.isReady ? 1 : 0.5)
+                    }
+                    .disabled(!camera.isReady || camera.isCapturing)
+                    .accessibilityLabel("Take photo")
+                    .accessibilityHint("Save the camera view with your drawing to Photos and show a preview")
+                    .accessibilityIdentifier("takePhotoButton")
+                }
+                .overlay(alignment: .bottomLeading) {
+                    if showColors {
+                        InkColorPalette(selectedColor: camera.drawing.color) { color in
+                            camera.selectColor(color)
+                            showColors = false
+                        }
+                        .fixedSize()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                        .shadow(color: .black.opacity(0.2), radius: 8, y: 2)
+                        .padding(.bottom, 76)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -79,7 +114,7 @@ struct ContentView: View {
             }
         }
         .sheet(item: $camera.capturedPhoto) { photo in
-            PhotoPreview(photo: photo)
+            PhotoPreview(photo: photo, saveStatus: camera.photoSaveStatus)
         }
         .alert(item: $camera.captureAlert) { alert in
             Alert(title: Text("Couldn't take photo"), message: Text(alert.message),
@@ -88,19 +123,73 @@ struct ContentView: View {
     }
 }
 
+private struct InkColorPalette: View {
+    let selectedColor: InkColor
+    let onSelect: (InkColor) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Drawing color")
+                .font(.headline)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 12), count: 4), spacing: 12) {
+                ForEach(InkColor.allCases) { color in
+                    Button {
+                        onSelect(color)
+                    } label: {
+                        Circle()
+                            .fill(color.color)
+                            .frame(width: 40, height: 40)
+                            .overlay(Circle().strokeBorder(.gray, lineWidth: 1))
+                            .overlay {
+                                if color == selectedColor {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundStyle(checkmarkColor(for: color))
+                                }
+                            }
+                            .frame(width: 48, height: 48)
+                            .overlay {
+                                if color == selectedColor {
+                                    Circle().strokeBorder(.primary, lineWidth: 2)
+                                }
+                            }
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(color.rawValue)
+                    .accessibilityAddTraits(color == selectedColor ? .isSelected : [])
+                    .accessibilityIdentifier("inkColor-\(color.rawValue)")
+                }
+            }
+        }
+        .frame(width: 228)
+        .padding(16)
+    }
+
+    private func checkmarkColor(for color: InkColor) -> Color {
+        switch color {
+        case .black, .red, .blue, .purple: .white
+        case .white, .orange, .yellow, .green: .black
+        }
+    }
+}
+
 struct DrawingView: View {
     // Points are normalized to the visible camera area, including its aspect-fill crop.
-    let points: [CGPoint]
+    let strokes: [DrawingStroke]
 
     var body: some View {
         Canvas { context, size in
-            guard points.count > 1, let first = points.first else { return }
-            var path = Path()
-            path.move(to: CGPoint(x: first.x * size.width, y: first.y * size.height))
-            for point in points.dropFirst() {
-                path.addLine(to: CGPoint(x: point.x * size.width, y: point.y * size.height))
+            for stroke in strokes {
+                guard stroke.points.count > 1, let first = stroke.points.first else { continue }
+                var path = Path()
+                path.move(to: CGPoint(x: first.x * size.width, y: first.y * size.height))
+                for point in stroke.points.dropFirst() {
+                    path.addLine(to: CGPoint(x: point.x * size.width, y: point.y * size.height))
+                }
+                context.stroke(path, with: .color(stroke.color.color), lineWidth: PhotoRenderer.lineWidth)
             }
-            context.stroke(path, with: .color(.black), lineWidth: PhotoRenderer.lineWidth)
         }
     }
 }
